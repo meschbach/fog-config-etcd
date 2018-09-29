@@ -51,6 +51,7 @@ function EtcDConfig( programName, instanceName, clusterName = "default", etcd = 
 			const nextIndex = initValueResponse.node.modifiedIndex + 1;
 			const rawValue = initValueResponse.node.value;
 			const value = JSON.parse( rawValue );
+			//TODO: Nothing should happen until after the initial value is fully resolved.
 			action( value );
 
 			const doneFuture = new Future();
@@ -66,7 +67,7 @@ function EtcDConfig( programName, instanceName, clusterName = "default", etcd = 
 
 				const actionResult = action(value);
 				const actionPromise = Promise.resolve( actionResult );
-				actionPromise.then(() => {
+				actionPromise.then(function() {
 					const waitIndex = result.node.modifiedIndex;
 					cancelWait = etcdClient.wait(path, {waitIndex: waitIndex, recursive: false}, onCallback);
 				}).catch((error) =>{
@@ -106,7 +107,80 @@ function EtcDConfig( programName, instanceName, clusterName = "default", etcd = 
 				return r;
  			}, {});
 			return colllection;
-		}
+		},
+		watchCollection: async ( key, action ) => {
+			//Resolve our target resources
+			const path = ["fog", clusterName, "config", programName, key].join("/");
+			//Retrieve the current state of that resource
+			const initValueResponse = await etcdClientPromise.get( path );
+			//Internalize the resource state
+			if( !initValueResponse.node ) { return {}; }
+			const nextIndex = initValueResponse.node.modifiedIndex + 1;
+			const nodes = initValueResponse.node.nodes;
+
+			const prefixLength = initValueResponse.node.key.length + 1;
+			const colllection = nodes.reduce( (r, n) => {
+				const rawValue = n.value;
+				const value = JSON.parse( rawValue );
+				const key = n.key.substring( prefixLength );
+				r[key] = value;
+				return r;
+			}, {});
+
+
+			//TODO: Nothing should happen until after the initial value is fully resolved.
+			action( colllection );
+
+			//Notifcations for synchronization
+			const doneFuture = new Future();
+
+			function onCallback(error, result, next){
+				console.log("onCallback");
+				//Error handling
+				if( error ){
+					//If you are proxying through Docker you will receive this instead of actual values.
+					if( error.code == "ESOCKETTIMEDOUT"){ return next(onCallback); }
+					//Chain real errors
+					doneFuture.reject(error);
+				}
+
+				//Translate the values
+				const nodes = result.node.nodes;
+				console.log("** Results ", result);
+
+				const rawValue = result.node.value;
+				const value = JSON.parse( rawValue );
+				const key = result.node.key.substring( prefixLength );
+				colllection[key] = value;
+
+				//Dispatch chnage event to the interested client
+				const actionResult = action(colllection);
+				//Ensure we are done processing the event
+				const actionPromise = Promise.resolve( actionResult );
+				actionPromise.then(function() {
+					console.log("*** Keep going? ", keepGoing);
+					if( keepGoing ) {
+						//Wait on further changes
+						const waitIndex = result.node.modifiedIndex;
+						cancelWait = etcdClient.wait(path, {waitIndex: waitIndex, recursive: true}, onCallback);
+					}
+				}).catch((error) =>{
+					doneFuture.reject(error);
+				});
+			}
+
+			let keepGoing = true;
+			let cancelWait = etcdClient.wait(path, {recursive: true}, onCallback);
+			return {
+				done: doneFuture.promised,
+				end: () =>{
+					console.log("Stopping");
+					keepGoing = false;
+					cancelWait();
+					doneFuture.accept(null);
+				}
+			};
+		},
 	}
 }
 
@@ -218,8 +292,56 @@ describe("Program configuration", function(){
 		});
 
 		describe("for watching", function(){
-			it( "it seeds the values on start")
-			it( "it notifies on change")
+			it( "it seeds the values on start", async function(){
+				const programName = "airplane";
+				const cluster = "turbulance";
+				const key = "shaky";
+				const example = { trailmix: 1, port: 42, strange: 'loop'};
+
+				const system = new EtcDConfig( programName, programName, cluster);
+				await system.config.setCollection(key, example);
+
+				const initialValue = new Future();
+				const controlLoop = await system.config.watchCollection(key, function(changeset) {
+					console.log("*** Changeset", changeset);
+					initialValue.accept( changeset );
+				});
+				const value = await initialValue.promised;
+
+				controlLoop.end();
+				expect( value ).to.deep.eq(value);
+			})
+
+			it( "it notifies on a single change", async function(){
+				const programName = "airplane";
+				const cluster = "turbulance";
+				const key = "shaky";
+				const example = { trailmix: 1, port: 42, strange: 'loop'};
+
+				const system = new EtcDConfig( programName, programName, cluster);
+				await system.config.setCollection(key, example);
+
+				let seenFirst = false;
+				const syncFirst = new Future();
+				const sync = new Future();
+				const controlLoop = await system.config.watchCollection(key, function(changeset) {
+					if( seenFirst ){
+						sync.accept( changeset );
+					} else {
+						syncFirst.accept(true);
+						seenFirst = true;
+					}
+				});
+				await syncFirst.promised;
+				console.log("First done");
+				await system.config.set(key + "/port" , 1024);
+				console.log("Update complete");
+				const value = await sync.promised;
+
+				console.log("Ending control loop");
+				controlLoop.end();
+				expect( value ).to.deep.eq(value);
+			});
 		});
 	});
 });
