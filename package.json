@@ -1,0 +1,11 @@
+{
+  "name": "fog-config-etcd",
+  "version": "0.0.1",
+  "description": "Fog Configuration module backed by EtcD",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Mark Eschbach <meschbach@gmail.com>",
+  "license": "MIT"
+}
