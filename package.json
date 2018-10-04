@@ -7,5 +7,12 @@
     "test": "mocha"
   },
   "author": "Mark Eschbach <meschbach@gmail.com>",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "chai": "^4.2.0",
+    "etcdjs": "https://github.com/meschbach/etcdjs.git#550a2af",
+    "etcdjs-promise": "^1.0.0",
+    "junk-bucket": "^1.0.6",
+    "mocha": "^5.2.0"
+  }
 }
