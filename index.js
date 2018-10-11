@@ -55,6 +55,7 @@ function etcdWatchControlLoop( path, recursive, mapInit, mapChange, onNotify, et
 			if( error.code == "ESOCKETTIMEDOUT"){ return next(onCallback); }
 			//Chain real errors
 			// doneFuture.reject(error);
+			return ;
 		}
 
 		//Translate the values
