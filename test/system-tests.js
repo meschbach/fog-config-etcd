@@ -72,7 +72,7 @@ describe("Program configuration", function(){
 			});
 
 			//EtcD or this code has a sync issue causing the callback to never to called.
-			xit( "it notifies on change", async function(){
+			it( "it notifies on change", async function(){
 				const programName = "notify-test";
 				const cluster = "frog";
 				const key = "chirp";
@@ -81,6 +81,7 @@ describe("Program configuration", function(){
 
 				const system = new EtcDConfig( programName, programName, cluster);
 				await system.config.set(key, exampleValue);
+				const seededFuture = new Future();
 				let seeded = false;
 				const valueUpdate = new Future();
 				const controlLoop = await system.config.watch( key, (value) => {
@@ -89,8 +90,10 @@ describe("Program configuration", function(){
 						controlLoop.end();
 					}else {
 						seeded = true;
+						seededFuture.accept(true);
 					}
 				} );
+				await seededFuture.promised;
 				await system.config.set(key, newValue );
 				const value = await valueUpdate.promised;
 				expect( value ).to.deep.eq( newValue );
